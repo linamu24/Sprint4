@@ -1,0 +1,11 @@
+[Unit]
+Description=Examen Microservice
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/docker run -p 8001:8000 examen-service
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
