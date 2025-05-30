@@ -1,0 +1,49 @@
+_format_version: "2.1"
+
+services:
+  - name: paciente_service
+    host: paciente_upstream
+    protocol: http
+    routes:
+      - name: pacientes
+        paths:
+          - /pacientes
+        strip_path: false
+
+  - name: diagnostico_service
+    host: diagnostico_upstream
+    protocol: http
+    routes:
+      - name: diagnosticos
+        paths:
+          - /diagnosticos
+        strip_path: false
+      - name: reporte
+        paths:
+          - /reporte
+        strip_path: false
+
+  - name: examen_service
+    host: examen_upstream
+    protocol: http
+    routes:
+      - name: examenes
+        paths:
+          - /examenes
+        strip_path: false
+
+upstreams:
+  - name: paciente_upstream
+    targets:
+      - target: 10.128.0.84:8080
+        weight: 100
+
+  - name: diagnostico_upstream
+    targets:
+      - target: 10.128.0.85:8080
+        weight: 100
+
+  - name: examen_upstream
+    targets:
+      - target: 10.128.0.86:8080
+        weight: 100

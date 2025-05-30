@@ -1,0 +1,243 @@
+
+# ***************** Universidad de los Andes ***********************
+# ****** Despliegue adaptado para microservicios de epilepsia *****
+
+resources:
+# Firewalls
+- name: msd-api-gateway
+  type: compute.v1.firewall
+  properties:
+    network: global/networks/default
+    priority: 1000
+    direction: INGRESS
+    sourceRanges:
+    - 0.0.0.0/0
+    targetTags:
+    - msd-api-gateway
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - 8000
+
+- name: msd-services-apps
+  type: compute.v1.firewall
+  properties:
+    network: global/networks/default
+    priority: 1000
+    direction: INGRESS
+    sourceTags:
+    - msd-api-gateway
+    targetTags:
+    - msd-services-firewall
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - 8080
+
+- name: msd-services-apps-web
+  type: compute.v1.firewall
+  properties:
+    network: global/networks/default
+    priority: 1000
+    direction: INGRESS
+    sourceRanges:
+    - 0.0.0.0/0
+    targetTags:
+    - msd-services-firewall
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - 8080
+
+- name: msd-service-db
+  type: compute.v1.firewall
+  properties:
+    network: global/networks/default
+    priority: 1000
+    direction: INGRESS
+    sourceTags:
+    - msd-services-firewall
+    targetTags:
+    - msd-service-db
+    allowed:
+    - IPProtocol: TCP
+      ports:
+      - 5432
+      - 27017
+
+# Router y NAT
+- name: msd-router
+  type: compute.v1.router
+  properties:
+    region: us-central1
+    network: global/networks/default
+    nats:
+    - name: msd-nat
+      natIpAllocateOption: AUTO_ONLY
+      sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+
+# MongoDB Instance
+- name: msd-mongo-db
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.90
+    tags:
+      items:
+      - msd-service-db
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          docker run --restart=always -d -p 27017:27017 --name mongo-db mongo
+
+# PostgreSQL para paciente-service
+- name: msd-postgres-db
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.82
+    tags:
+      items:
+      - msd-service-db
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          docker run --restart=always -d -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=pacientes_db -p 5432:5432 --name postgres-db postgres
+
+# Kong Gateway
+- name: msd-kong-instance
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.81
+      accessConfigs:
+      - name: External NAT
+        type: ONE_TO_ONE_NAT
+    tags:
+      items:
+      - msd-api-gateway
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          mkdir -p /home/labs
+          cd /home/labs
+          echo 'version: "2.1"
+          services: {}' > docker-compose.yaml
+          docker run -d --name kong -v /home/labs:/kong/declarative -e KONG_DATABASE=off -e KONG_DECLARATIVE_CONFIG=/kong/declarative/kong.yaml -p 8000:8000 kong/kong-gateway
+
+# paciente-service
+- name: msd-paciente-ms
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.84
+      accessConfigs:
+      - name: External NAT
+        type: ONE_TO_ONE_NAT
+    tags:
+      items:
+      - msd-services-firewall
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          docker run -d -p 8080:8080 --name paciente-service paciente-service
+
+# diagnostico-service
+- name: msd-diagnostico-ms
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.85
+      accessConfigs:
+      - name: External NAT
+        type: ONE_TO_ONE_NAT
+    tags:
+      items:
+      - msd-services-firewall
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          docker run -d -p 8080:8080 --name diagnostico-service diagnostico-service
+
+# examen-service
+- name: msd-examen-ms
+  type: compute.v1.instance
+  properties:
+    zone: us-central1-a
+    machineType: zones/us-central1-a/machineTypes/e2-micro
+    disks:
+    - deviceName: boot
+      type: PERSISTENT
+      boot: true
+      autoDelete: true
+      initializeParams:
+        sourceImage: projects/cos-cloud/global/images/family/cos-stable
+    networkInterfaces:
+    - network: global/networks/default
+      networkIP: 10.128.0.86
+      accessConfigs:
+      - name: External NAT
+        type: ONE_TO_ONE_NAT
+    tags:
+      items:
+      - msd-services-firewall
+    metadata:
+      items:
+      - key: startup-script
+        value: |
+          docker run -d -p 8080:8080 --name examen-service examen-service
